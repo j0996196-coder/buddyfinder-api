@@ -16,11 +16,17 @@ const twilio     = require("twilio");
 const app    = express();
 const server = http.createServer(app);
 const io     = new Server(server, {
-  cors: { origin: process.env.FRONTEND_URL || "*", methods: ["GET","POST"] }
+  cors: { origin: "*", methods: ["GET","POST","PUT","DELETE"] }
 });
 
 // ── MIDDLEWARE ────────────────────────────────────────────────────
-app.use(cors({ origin: process.env.FRONTEND_URL || "*" }));
+app.use(cors({
+  origin: "*",
+  methods: ["GET","POST","PUT","DELETE","OPTIONS"],
+  allowedHeaders: ["Content-Type","Authorization"],
+  credentials: false
+}));
+app.options("*", cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -41,8 +47,14 @@ const storage = new CloudinaryStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
 
-// ── TWILIO ────────────────────────────────────────────────────────
-const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+// ── TWILIO (optional — phone OTP only) ───────────────────────────
+let twilioClient = null;
+if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+  twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+  console.log("✅ Twilio initialized");
+} else {
+  console.log("⚠️  Twilio not configured — phone OTP disabled");
+}
 
 // ══════════════════════════════════════════════════════════════════
 // MODELS
@@ -145,6 +157,7 @@ authRouter.post("/login", async (req, res) => {
 authRouter.post("/phone/send-otp", async (req, res) => {
   const { phone } = req.body;
   if (!phone) return res.status(400).json({ error: "Phone required" });
+  if (!twilioClient) return res.status(503).json({ error: "Phone OTP not configured" });
   try {
     await twilioClient.verify.v2.services(process.env.TWILIO_VERIFY_SID)
       .verifications.create({ to: phone, channel: "sms" });
@@ -156,6 +169,7 @@ authRouter.post("/phone/send-otp", async (req, res) => {
 authRouter.post("/phone/verify-otp", async (req, res) => {
   const { phone, otp, name, gender } = req.body;
   if (!phone || !otp) return res.status(400).json({ error: "Phone and OTP required" });
+  if (!twilioClient) return res.status(503).json({ error: "Phone OTP not configured" });
   try {
     const check = await twilioClient.verify.v2.services(process.env.TWILIO_VERIFY_SID)
       .verificationChecks.create({ to: phone, code: otp });
